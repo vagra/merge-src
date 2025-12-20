@@ -170,7 +170,10 @@ func (e *Engine) matchRule(relPath string) int {
 	for _, r := range e.Cfg.Rules {
 		matched := false
 		if r.IsDir {
-			if relPath == r.Path || strings.HasPrefix(relPath, r.Path+"/") {
+            // 增加对根目录 "." 的支持
+			if r.Path == "." {
+				matched = true
+			} else if relPath == r.Path || strings.HasPrefix(relPath, r.Path+"/") {
 				matched = true
 			}
 		} else if r.IsWildcard {
