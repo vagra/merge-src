@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -43,23 +42,21 @@ type AnalysisState struct {
 }
 
 func main() {
-	// Windows 颜色兼容处理
 	if runtime.GOOS == "windows" {
 		enableWindowsANSI()
 	}
 
-	// 1. 读取配置文件
+	// 1. 读取配置
 	configPath := ".mergerule"
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		fmt.Printf("%s错误: 当前目录下未找到 .mergerule 配置文件%s\n", ColorRed, ColorReset)
-		fmt.Println("请创建一个 .mergerule 文件并定义规则。")
+		fmt.Printf("%s错误: 未找到 .mergerule%s\n", ColorRed, ColorReset)
 		os.Exit(1)
 	}
 
 	config := parseConfig(configPath)
 	state := newState(config)
 
-	// 2. 准备输出文件
+	// 2. 准备输出
 	timestamp := time.Now().Format("20060102-1504")
 	outputName := fmt.Sprintf("%s-%s.txt", config.OutputPrefix, timestamp)
 	outFile, err := os.Create(outputName)
@@ -68,50 +65,77 @@ func main() {
 	}
 	defer outFile.Close()
 
-	// 3. 开始遍历
-	fmt.Println("--- 智能遍历目录 (Go Engine) ---")
+	fmt.Println("--- 智能遍历目录 (Go Recursive) ---")
 
-	separator := strings.Repeat("=", 80)
-	mergedCount := 0
+	// 3. 开始递归遍历 (从当前目录 ".")
+	// 使用手动递归代替 filepath.WalkDir 以便控制检查时机
+	processDir(".", config, state, outFile)
 
-	err = filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relPath := filepath.ToSlash(path)
-		if relPath == "." {
-			return nil
-		}
-
-		// --- 目录处理 ---
-		if d.IsDir() {
-			state.VisitedDirs[relPath] = true
-			if !shouldTraverse(relPath, config, state) {
-				return filepath.SkipDir
+	// 4. 检查无效目录 (兜底检查那些连根都没找到的)
+	// 注意：文件缺失已经在遍历过程中输出了，这里只报“路径写错了找不到目录”的情况
+	hasInvalidDir := false
+	for dir := range state.ExpectationsByDir {
+		if dir == "" { continue }
+		if !state.VisitedDirs[dir] {
+			if !hasInvalidDir {
+				fmt.Println("\n--- 检查无效路径 ---")
+				hasInvalidDir = true
 			}
-			return nil
+			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.FromSlash(dir), ColorReset)
 		}
+	}
 
-		// --- 文件处理 ---
-		action := matchRule(relPath, config.Rules)
-		shouldInclude := false
+	fmt.Printf("\n%s✔ 完成: %s%s\n", ColorGreen, outputName, ColorReset)
+}
 
-		if action == ActionInclude {
-			shouldInclude = true
-		} else if action == ActionExclude {
-			shouldInclude = false
-		}
+// --- 核心递归函数 ---
+func processDir(dirPath string, cfg Config, state *AnalysisState, outFile *os.File) {
+	// 1. 读取目录内容
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		// 如果读不到目录，可能是权限或不存在，跳过
+		return
+	}
+
+	// 规范化路径
+	relDir := filepath.ToSlash(dirPath)
+	if relDir == "." { relDir = "" }
+	
+	state.VisitedDirs[relDir] = true
+
+	// 2. 第一轮循环：仅处理文件 (合并)
+	separator := strings.Repeat("=", 80)
+	cStart, cEnd := getCommentStyle(cfg.CommentStyle)
+	
+	// [修改点] 构造带注释的分隔线
+	var commentedSeparator string
+	if cEnd == "" {
+		// 单行注释风格 (如 // 或 #)
+		commentedSeparator = fmt.Sprintf("%s %s", cStart, separator)
+	} else {
+		// 包裹注释风格 (如 <!-- -->)
+		commentedSeparator = fmt.Sprintf("%s %s %s", cStart, separator, cEnd)
+	}
+
+	// 1. 处理文件
+	for _, entry := range entries {
+		if entry.IsDir() { continue } // 先跳过目录
+
+		fileName := entry.Name()
+		fullPath := filepath.Join(dirPath, fileName)
+		relPath := filepath.ToSlash(fullPath) // 转为 / 分隔
+
+		// 规则匹配
+		action := matchRule(relPath, cfg.Rules)
+		shouldInclude := (action == ActionInclude)
 
 		if shouldInclude {
-			ext := filepath.Ext(d.Name())
+			// 后缀与显式检查
+			ext := filepath.Ext(fileName)
 			isExplicit := state.ExplicitFiles[relPath]
 			isSource := false
-			for _, e := range config.Extensions {
-				if strings.EqualFold(ext, e) {
-					isSource = true
-					break
-				}
+			for _, e := range cfg.Extensions {
+				if strings.EqualFold(ext, e) { isSource = true; break }
 			}
 
 			if !isExplicit && !isSource {
@@ -120,14 +144,14 @@ func main() {
 		}
 
 		if shouldInclude {
-			fmt.Printf("%s合并: %s%s\n", ColorGreen, path, ColorReset)
+			fmt.Printf("%s合并: %s%s\n", ColorGreen, fullPath, ColorReset)
 
-			cStart, cEnd := getCommentStyle(config.CommentStyle)
-			outFile.WriteString(fmt.Sprintf("\n%s\n", separator))
-			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, path, cEnd))
-			outFile.WriteString(fmt.Sprintf("%s\n", separator))
+			// [修改点] 使用带注释的分隔线写入
+			outFile.WriteString(fmt.Sprintf("\n%s\n", commentedSeparator))
+			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, fullPath, cEnd))
+			outFile.WriteString(fmt.Sprintf("%s\n", commentedSeparator))
 
-			content, err := os.ReadFile(path)
+			content, err := os.ReadFile(fullPath)
 			if err == nil {
 				outFile.Write(content)
 				outFile.WriteString("\n")
@@ -136,54 +160,44 @@ func main() {
 			}
 
 			state.MergedFiles[relPath] = true
-			mergedCount++
 		}
-
-		return nil
-	})
-
-	if err != nil {
-		fmt.Printf("遍历出错: %v\n", err)
 	}
 
-	// 4. 完整性检查
-	fmt.Println("\n--- 完整性检查 ---")
-	missingCount := 0
-	for dir, files := range state.ExpectationsByDir {
-		for fname := range files {
-			fullPath := dir
-			if fullPath != "" {
-				fullPath = fullPath + "/" + fname
+	// 2. 检查缺失
+	if expectedFiles, ok := state.ExpectationsByDir[relDir]; ok {
+		for fname := range expectedFiles {
+			// 构造期待的相对路径
+			var expectedRel string
+			if relDir == "" {
+				expectedRel = fname
 			} else {
-				fullPath = fname
+				expectedRel = relDir + "/" + fname
 			}
 
-			if !state.MergedFiles[fullPath] {
-				// 只有当目录确实被访问过（存在），或者目录虽然没访问过但我们也没报过目录丢失时
-				if !state.VisitedDirs[dir] && dir != "" {
-					continue
-				}
-				fmt.Printf("%s缺失: %s%s\n", ColorRed, filepath.FromSlash(fullPath), ColorReset)
-				missingCount++
+			if !state.MergedFiles[expectedRel] {
+				// 使用系统分隔符打印，为了好看
+				displayPath := filepath.FromSlash(expectedRel)
+				fmt.Printf("%s缺失: %s%s\n", ColorRed, displayPath, ColorReset)
 			}
 		}
 	}
 
-	// 5. 无效目录检查
-	fmt.Println("\n--- 检查无效目录 ---")
-	for dir := range state.ExpectationsByDir {
-		if dir == "" {
-			continue
-		}
-		if !state.VisitedDirs[dir] {
-			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.FromSlash(dir), ColorReset)
+	// 3. 递归子目录
+	for _, entry := range entries {
+		if !entry.IsDir() { continue }
+
+		subDirName := entry.Name()
+		subDirPath := filepath.Join(dirPath, subDirName)
+		relSubPath := filepath.ToSlash(subDirPath)
+
+		// 剪枝逻辑
+		if shouldTraverse(relSubPath, cfg, state) {
+			processDir(subDirPath, cfg, state, outFile)
 		}
 	}
-
-	fmt.Printf("\n%s✔ 完成: %s (共 %d 个文件)%s\n", ColorGreen, outputName, mergedCount, ColorReset)
 }
 
-// --- 核心逻辑 ---
+// --- 辅助函数 ---
 
 const (
 	ActionNone    = 0
@@ -220,9 +234,7 @@ func newState(cfg Config) *AnalysisState {
 				for _, t := range targets {
 					s.ExplicitFiles[t] = true
 					dir := filepath.ToSlash(filepath.Dir(t))
-					if dir == "." {
-						dir = ""
-					}
+					if dir == "." { dir = "" }
 					if s.ExpectationsByDir[dir] == nil {
 						s.ExpectationsByDir[dir] = make(map[string]bool)
 					}
@@ -236,9 +248,7 @@ func newState(cfg Config) *AnalysisState {
 
 func parseConfig(path string) Config {
 	file, err := os.Open(path)
-	if err != nil {
-		panic(err)
-	}
+	if err != nil { panic(err) }
 	defer file.Close()
 
 	cfg := Config{
@@ -251,9 +261,8 @@ func parseConfig(path string) Config {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
+		if line == "" || strings.HasPrefix(line, "#") { continue }
+		
 		if strings.Contains(line, "=") && !strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "-") {
 			parts := strings.SplitN(line, "=", 2)
 			key := strings.TrimSpace(strings.ToLower(parts[0]))
@@ -264,9 +273,7 @@ func parseConfig(path string) Config {
 				var cleanExts []string
 				for _, e := range exts {
 					e = strings.TrimSpace(e)
-					if !strings.HasPrefix(e, ".") {
-						e = "." + e
-					}
+					if !strings.HasPrefix(e, ".") { e = "." + e }
 					cleanExts = append(cleanExts, e)
 				}
 				cfg.Extensions = cleanExts
@@ -281,14 +288,10 @@ func parseConfig(path string) Config {
 			isInclude := strings.HasPrefix(line, "+")
 			rawPath := strings.TrimSpace(line[1:])
 			slashPath := filepath.ToSlash(rawPath)
-			cleanPath := filepath.ToSlash(filepath.Clean(rawPath)) // Clean removes trailing slash
-
-			// Hack: Clean removes trailing slash, check original slashPath for Dir/Wildcard info
+			cleanPath := filepath.ToSlash(filepath.Clean(rawPath))
 			isDir := strings.HasSuffix(slashPath, "/")
 			isWild := strings.HasSuffix(slashPath, ".*")
-
-			// 如果是目录，Clean 后的路径必须被用来做前缀匹配
-
+			
 			cfg.Rules = append(cfg.Rules, Rule{
 				Path:       cleanPath,
 				IsInclude:  isInclude,
@@ -307,31 +310,21 @@ func matchRule(relPath string, rules []Rule) int {
 	for _, r := range rules {
 		matched := false
 		if r.IsDir {
-			if relPath == r.Path || strings.HasPrefix(relPath, r.Path+"/") {
-				matched = true
-			}
+			if relPath == r.Path || strings.HasPrefix(relPath, r.Path+"/") { matched = true }
 		} else if r.IsWildcard {
 			baseRule := strings.TrimSuffix(r.Path, ".*")
 			if strings.HasPrefix(relPath, baseRule) {
-				if len(relPath) > len(baseRule) && relPath[len(baseRule)] == '.' {
-					matched = true
-				}
+				if len(relPath) > len(baseRule) && relPath[len(baseRule)] == '.' { matched = true }
 			}
 		} else {
-			if relPath == r.Path {
-				matched = true
-			}
+			if relPath == r.Path { matched = true }
 		}
 
 		if matched {
 			rLen := len(r.Path)
 			if rLen > bestLen {
 				bestLen = rLen
-				if r.IsInclude {
-					bestAction = ActionInclude
-				} else {
-					bestAction = ActionExclude
-				}
+				if r.IsInclude { bestAction = ActionInclude } else { bestAction = ActionExclude }
 			}
 		}
 	}
@@ -340,34 +333,20 @@ func matchRule(relPath string, rules []Rule) int {
 
 func shouldTraverse(dirPath string, cfg Config, state *AnalysisState) bool {
 	action := matchRule(dirPath, cfg.Rules)
-	if action == ActionInclude {
-		return true
-	}
-	if state.TraversePaths[dirPath] {
-		return true
-	}
+	if action == ActionInclude { return true }
+	if state.TraversePaths[dirPath] { return true }
 	return false
 }
 
 func getCommentStyle(style string) (string, string) {
 	switch strings.ToLower(style) {
-	case "python", "ruby", "perl", "sh", "yaml", "conf", "ini", "dockerfile":
-		return "#", ""
-	case "sql", "lua", "haskell":
-		return "--", ""
-	case "html", "xml":
-		return "<!--", "-->"
-	case "c", "cpp", "go", "java", "js", "ts", "php", "rust", "cs", "swift":
-		return "//", ""
-	default:
-		return "//", ""
+	case "python", "ruby", "perl", "sh", "yaml", "conf", "ini", "dockerfile", "makefile": return "#", ""
+	case "sql", "lua", "haskell": return "--", ""
+	case "html", "xml": return "<!--", "-->"
+	default: return "//", ""
 	}
 }
 
 func enableWindowsANSI() {
-	// 这是一个最简易的实现，确保 Windows CMD/PowerShell 能显示颜色
-	// 实际上 Go 的标准库在 Windows 上默认不处理 ANSI 转义。
-	// 为了不引入第三方库，我们只做一个空调用，依赖现代终端 (Windows Terminal, Git Bash, VSCode) 自带的支持。
-	// 现代 Windows 10/11 的终端默认都支持。
-	// 如果必须支持旧版 CMD，需要 syscall 调用 SetConsoleMode，这里为了单文件简洁性省略。
+	// Standard Windows 10/11 terminal support
 }
