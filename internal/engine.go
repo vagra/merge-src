@@ -9,7 +9,7 @@ import (
 
 // Engine 结构体
 type Engine struct {
-	Cfg               *Config // 直接使用 Config，无需 import
+	Cfg               *Config
 	ExplicitFiles     map[string]bool
 	ExpectationsByDir map[string]map[string]bool
 	MergedFiles       map[string]bool
@@ -33,72 +33,74 @@ func NewEngine(cfg *Config) *Engine {
 func (e *Engine) initRules() {
 	for _, r := range e.Cfg.Rules {
 		if r.IsInclude {
-			parts := strings.Split(r.Path, "/")
-			for i := 1; i < len(parts); i++ {
-				e.TraversePaths[strings.Join(parts[:i], "/")] = true
+			// 1. 计算 Vital Path (BaseDir 的父级必须遍历)
+			if r.BaseDir != "" {
+				parts := strings.Split(r.BaseDir, "/")
+				// 注意：如果 BaseDir 是 a/b，我们需要保证 a 被遍历
+				for i := 1; i <= len(parts); i++ {
+					e.TraversePaths[strings.Join(parts[:i], "/")] = true
+				}
+			} else {
+				e.TraversePaths[""] = true // 根目录
 			}
-			if !r.IsDir {
-				var targets []string
-				if r.IsWildcard {
-					base := strings.TrimSuffix(r.Path, ".*")
-					for _, ext := range e.Cfg.Extensions {
-						targets = append(targets, base+ext)
-					}
-				} else {
-					targets = append(targets, r.Path)
+
+			// 2. 生成期待列表 (仅针对精确文件名)
+			// 如果 Pattern 不含通配符 (*, ?, [)，则视为显式文件期待
+			if !r.CheckExts && !hasMeta(r.Pattern) {
+				// 这是一个精确文件规则，如 +path/file.txt
+				full := filepath.Join(r.BaseDir, r.Pattern)
+				full = filepath.ToSlash(full)
+				
+				e.ExplicitFiles[full] = true
+				
+				dir := r.BaseDir
+				if e.ExpectationsByDir[dir] == nil {
+					e.ExpectationsByDir[dir] = make(map[string]bool)
 				}
-				for _, t := range targets {
-					e.ExplicitFiles[t] = true
-					dir := filepath.ToSlash(filepath.Dir(t))
-					if dir == "." {
-						dir = ""
-					}
-					if e.ExpectationsByDir[dir] == nil {
-						e.ExpectationsByDir[dir] = make(map[string]bool)
-					}
-					e.ExpectationsByDir[dir][filepath.Base(t)] = true
-				}
+				e.ExpectationsByDir[dir][r.Pattern] = true
 			}
 		}
 	}
 }
 
+// 简单的检查是否包含 Glob 通配符
+func hasMeta(path string) bool {
+	return strings.ContainsAny(path, "*?[]")
+}
+
 func (e *Engine) Run(startDir string, outFile *os.File) {
-	fmt.Println("--- 智能遍历目录 (Go Engine / Internal Pkg) ---")
+	fmt.Println("--- 智能遍历目录 (Glob Engine) ---")
 	e.processDir(startDir, outFile)
 	e.reportInvalidDirs()
 }
 
 func (e *Engine) processDir(dirPath string, outFile *os.File) {
 	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 
 	relDir := filepath.ToSlash(dirPath)
-	if relDir == "." {
-		relDir = ""
-	}
+	if relDir == "." { relDir = "" }
 	e.VisitedDirs[relDir] = true
 
-	// 直接调用 util.go 里的函数
 	sepLine, cStart, cEnd := GetCommentedSeparator(e.Cfg.CommentStyle)
 
-	// 1. 文件处理
+	// 文件处理
 	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
+		if entry.IsDir() { continue }
 
 		fileName := entry.Name()
 		fullPath := filepath.Join(dirPath, fileName)
 		relPath := filepath.ToSlash(fullPath)
 
-		if e.shouldMerge(relPath, fileName) {
-			fmt.Printf("%s合并: %s%s\n", ColorGreen, fullPath, ColorReset)
+		// 核心判定
+		if e.shouldMerge(relPath, relDir, fileName) {
+			// [修改] 强制转为正斜杠输出
+			displayPath := filepath.ToSlash(fullPath)
+			fmt.Printf("%s合并: %s%s\n", ColorGreen, displayPath, ColorReset)
 
 			outFile.WriteString(fmt.Sprintf("\n%s\n", sepLine))
-			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, fullPath, cEnd))
+			// [修改] 文件内部的标记也建议用正斜杠，保持一致
+			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, displayPath, cEnd))
 			outFile.WriteString(fmt.Sprintf("%s\n", sepLine))
 
 			content, err := os.ReadFile(fullPath)
@@ -112,26 +114,21 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 		}
 	}
 
-	// 2. 缺失检查
+	// 缺失检查
 	if expectedFiles, ok := e.ExpectationsByDir[relDir]; ok {
 		for fname := range expectedFiles {
 			var expectedRel string
-			if relDir == "" {
-				expectedRel = fname
-			} else {
-				expectedRel = relDir + "/" + fname
-			}
+			if relDir == "" { expectedRel = fname } else { expectedRel = relDir + "/" + fname }
 			if !e.MergedFiles[expectedRel] {
-				fmt.Printf("%s缺失: %s%s\n", ColorRed, filepath.FromSlash(expectedRel), ColorReset)
+				// [修改] 强制转为正斜杠输出
+				fmt.Printf("%s缺失: %s%s\n", ColorRed, filepath.ToSlash(expectedRel), ColorReset)
 			}
 		}
 	}
 
-	// 3. 递归
+	// 递归
 	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
+		if !entry.IsDir() { continue }
 		subDir := filepath.Join(dirPath, entry.Name())
 		relSub := filepath.ToSlash(subDir)
 		if e.shouldTraverse(relSub) {
@@ -140,76 +137,93 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 	}
 }
 
-func (e *Engine) shouldMerge(relPath string, fileName string) bool {
-	action := e.matchRule(relPath)
-	shouldInclude := (action == 1)
-	if shouldInclude {
-		ext := filepath.Ext(fileName)
-		isExplicit := e.ExplicitFiles[relPath]
-		isSource := false
-		for _, extItem := range e.Cfg.Extensions {
-			if strings.EqualFold(ext, extItem) {
-				isSource = true
-				break
+func (e *Engine) shouldMerge(relPath string, relDir string, fileName string) bool {
+	bestLen := -1
+	bestAction := 0 
+
+	for _, r := range e.Cfg.Rules {
+		matched := false
+		
+		// 1. 检查目录是否匹配
+		dirMatch := false
+		if r.Recursive {
+			// 递归模式: 必须是 BaseDir 或者是 BaseDir 的子目录
+			if r.BaseDir == "" || relDir == r.BaseDir || strings.HasPrefix(relDir, r.BaseDir+"/") {
+				dirMatch = true
+			}
+		} else {
+			// 平铺模式: 必须在 BaseDir 当前层级
+			if relDir == r.BaseDir {
+				dirMatch = true
 			}
 		}
-		if !isExplicit && !isSource {
-			shouldInclude = false
+
+		// 2. 检查文件/后缀是否匹配
+		if dirMatch {
+			if r.CheckExts {
+				// 目录规则 (+path/): 检查全局 extensions
+				if e.checkGlobalExt(fileName) {
+					matched = true
+				}
+			} else {
+				// 模式规则 (+path/*.c): 使用 filepath.Match 进行标准 Glob 匹配
+				// r.Pattern 可能是 *, *.c, name.*, test_?.c 等
+				if ok, _ := filepath.Match(r.Pattern, fileName); ok {
+					matched = true
+				}
+			}
+		}
+
+		if matched {
+			if len(r.Raw) > bestLen {
+				bestLen = len(r.Raw)
+				if r.IsInclude { bestAction = 1 } else { bestAction = 2 }
+			}
 		}
 	}
-	return shouldInclude
+	return bestAction == 1
+}
+
+func (e *Engine) checkGlobalExt(fileName string) bool {
+	ext := filepath.Ext(fileName)
+	for _, valid := range e.Cfg.Extensions {
+		if strings.EqualFold(ext, valid) { return true }
+	}
+	return false
 }
 
 func (e *Engine) shouldTraverse(relDir string) bool {
-	return e.matchRule(relDir) == 1 || e.TraversePaths[relDir]
-}
-
-func (e *Engine) matchRule(relPath string) int {
-	bestLen := -1
-	bestAction := 0
+	if e.TraversePaths[relDir] { return true }
+	
+	// 如果有递归规则覆盖了此目录，也必须遍历
 	for _, r := range e.Cfg.Rules {
-		matched := false
-		if r.IsDir {
-            // 增加对根目录 "." 的支持
-			if r.Path == "." {
-				matched = true
-			} else if relPath == r.Path || strings.HasPrefix(relPath, r.Path+"/") {
-				matched = true
-			}
-		} else if r.IsWildcard {
-			base := strings.TrimSuffix(r.Path, ".*")
-			if strings.HasPrefix(relPath, base) && len(relPath) > len(base) && relPath[len(base)] == '.' {
-				matched = true
-			}
-		} else {
-			if relPath == r.Path {
-				matched = true
-			}
-		}
-		if matched && len(r.Path) > bestLen {
-			bestLen = len(r.Path)
-			if r.IsInclude {
-				bestAction = 1
-			} else {
-				bestAction = 2
+		if r.IsInclude && r.Recursive {
+			// 检查 relDir 是否在 r.BaseDir 之下 (或者就是 r.BaseDir)
+			// 注意：这里逻辑要反过来，如果我们还没走到 BaseDir，当然要往深了走
+			// 如果我们已经在 BaseDir 下面了，并且是 Recursive，那更要走
+			
+			// 情况 A: relDir 是 BaseDir 的上级 (正在前往 BaseDir 的路上) -> TraversePaths 已经处理了
+			// 情况 B: relDir 是 BaseDir 的下级 -> 允许进入
+			if r.BaseDir == "" || strings.HasPrefix(relDir, r.BaseDir+"/") {
+				return true
 			}
 		}
 	}
-	return bestAction
+	return false
 }
 
 func (e *Engine) reportInvalidDirs() {
+	// 保持不变
 	hasInvalid := false
 	for dir := range e.ExpectationsByDir {
-		if dir == "" {
-			continue
-		}
+		if dir == "" { continue }
 		if !e.VisitedDirs[dir] {
 			if !hasInvalid {
 				fmt.Println("\n--- 检查无效路径 ---")
 				hasInvalid = true
 			}
-			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.FromSlash(dir), ColorReset)
+			// [修改] 强制转为正斜杠输出
+			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.ToSlash(dir), ColorReset)
 		}
 	}
 }
