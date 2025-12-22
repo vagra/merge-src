@@ -1,0 +1,21 @@
+# Binaries
+# 忽略编译生成的可执行文件
+merge-src
+merge-src.exe
+
+# Output files
+# 忽略工具生成的分析结果文件
+*-analysis-*.txt
+merge_src_result-*.txt
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# IDE specific
+.idea/
+.vscode/
+*.swp
+
+# Go specific
+vendor/

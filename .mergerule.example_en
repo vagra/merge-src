@@ -1,0 +1,60 @@
+# =================================================================
+# .mergerule Example Configuration (English)
+# Usage: Rename this file to ".mergerule" and place it in your project root.
+# =================================================================
+
+# --- Global Settings ---
+
+# 1. Extensions Filter
+# Only applies to "Directory Mode" rules (ending with /).
+extensions = .c, .h, .cpp, .go, .py, .java
+
+# 2. Comment Style
+# Determines the separator format.
+# Options: c (//), python (#), html (<!-- -->), sql (--)
+style = c
+
+# 3. Output Filename Prefix
+output_prefix = code-context
+
+
+# --- Path Rules ---
+# Principle: Longest Match Wins.
+# + Include
+# - Exclude
+
+# [Scenario 1] Include EVERYTHING recursively (filtered by extensions)
+# The dot "." represents the current root directory.
+# +./
+
+# [Scenario 2] Include a specific directory recursively (filtered by extensions)
+# Must end with "/"
++src/
++lib/driver/
+
+# [Scenario 3] Include a directory FLAT (No recursion, ignores extensions)
+# Matches files in 'docs' folder only.
++docs/*
+
+# [Scenario 4] Recursive Wildcard (Ignores extensions)
+# Find all .json files anywhere in 'assets' folder
++assets/**/*.json
+
+# [Scenario 5] Flat Wildcard (Ignores extensions)
+# Find all .txt files in 'root' folder only
++*.txt
+
+# [Scenario 6] Exact File (Priority High)
+# Explicitly include a specific file. It MUST exist, or tool reports error.
++Makefile
++README.md
++src/config/secret_template.conf
+
+# [Scenario 7] Exclusion Logic
+# Exclude the entire 'test' folder
+-test/
+
+# [Scenario 8] The "Rescue" Pattern (Override Exclusion)
+# Even though 'test/' is excluded, we want this specific file back.
+# This works because the path "test/main_test.c" is longer than "test/".
++test/main_test.c
