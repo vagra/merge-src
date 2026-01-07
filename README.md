@@ -17,7 +17,7 @@ Unlike `cat` or `find`, its core goal is **Validation** — ensuring the context
 - **🎯 Precise Control**: Define rules via `.mergerule`, supporting recursion, wildcards, and exact paths.
 - **🕵️‍♀️ Missing Detection**: The killer feature. If a rule requires a file that doesn't exist, it alerts you with **RED** highlights immediately.
 - **🧠 Smart Filtering**: Directory rules automatically respect your `extensions` setting (e.g., only `.c`, `.h`).
-- **🎨 Syntax Safe**: Separators use language-specific comment styles (C, Python, HTML, etc.) to keep the output valid.
+- **🎨 Smart Syntax**: Automatically detects file types to apply the correct comment style (e.g., `//` for C, `#` for Python, `<!-- -->` for Quarto). Configured style acts as a fallback.
 - **⚡️ Zero Dependency**: Single binary, cross-platform.
 
 ### 📦 Installation
@@ -55,7 +55,7 @@ merge-src
 # Auto-filter files by extension (only applies to Directory Mode rules)
 extensions = .c, .h, .cpp
 
-# Comment style for separators (c, python, sql, html)
+# Default/Fallback comment style (used if extension is unknown)
 style = c
 
 # Output filename prefix
@@ -93,7 +93,7 @@ Rules follow the **Longest Match Wins** principle. A more specific (longer path)
 - **🎯 精确控制**：通过 `.mergerule` 配置包含/排除规则，支持递归、通配符和精确文件指定。
 - **🕵️‍♀️ 缺失检测**：杀手级功能。如果规则中明确要求的文件未找到，工具会立刻用**红色高亮**报警。
 - **🧠 智能过滤**：目录模式下会自动根据 `extensions` 过滤无关文件（如二进制文件）。
-- **🎨 语法感知**：支持多种语言的注释风格（C, Python, HTML 等），生成的分割线不会破坏代码语法。
+- **🎨 智能语法**：自动根据文件后缀（如 .py, .qmd）选择正确的注释风格，生成的分割线不会破坏代码语法。仅在无法识别时使用默认配置。
 - **⚡️ 零依赖**：单文件 Go 二进制，跨平台。
 
 ### 📦 安装
@@ -130,7 +130,7 @@ merge-src
 # 源码后缀 (仅对目录模式生效)
 extensions = .c, .h, .cpp
 
-# 注释风格 (c, python, sql, html)
+# 默认/保底注释风格 (当后缀无法识别时使用)
 style = c
 
 # 输出文件名前缀
