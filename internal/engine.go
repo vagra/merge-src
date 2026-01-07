@@ -82,7 +82,8 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 	if relDir == "." { relDir = "" }
 	e.VisitedDirs[relDir] = true
 
-	sepLine, cStart, cEnd := GetCommentedSeparator(e.Cfg.CommentStyle)
+	// [删除] 原来的这一行，因为现在不能在循环外只生成一次了
+	// sepLine, cStart, cEnd := GetCommentedSeparator(e.Cfg.CommentStyle)
 
 	// 文件处理
 	for _, entry := range entries {
@@ -98,6 +99,10 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 			displayPath := filepath.ToSlash(fullPath)
 			fmt.Printf("%s合并: %s%s\n", ColorGreen, displayPath, ColorReset)
 
+			// [新增] 针对当前文件生成特定的分隔线
+			// 传入 fileName 进行探测，传入 e.Cfg.CommentStyle 作为保底
+			sepLine, cStart, cEnd := GetCommentedSeparator(fileName, e.Cfg.CommentStyle)
+
 			outFile.WriteString(fmt.Sprintf("\n%s\n", sepLine))
 			// [修改] 文件内部的标记也建议用正斜杠，保持一致
 			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, displayPath, cEnd))
@@ -106,6 +111,7 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 			content, err := os.ReadFile(fullPath)
 			if err == nil {
 				outFile.Write(content)
+				// 确保文件末尾换行，防止下一个 header 粘连
 				outFile.WriteString("\n")
 			} else {
 				outFile.WriteString(fmt.Sprintf("// Error reading file: %v\n", err))

@@ -1,0 +1,4 @@
+extensions = .go
+output_prefix = merge_src
+
++./

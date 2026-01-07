@@ -5,8 +5,7 @@ merge-src.exe
 
 # Output files
 # 忽略工具生成的分析结果文件
-*-analysis-*.txt
-merge_src_result-*.txt
+*.txt
 
 # OS specific
 .DS_Store

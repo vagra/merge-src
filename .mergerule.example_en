@@ -9,9 +9,9 @@
 # Only applies to "Directory Mode" rules (ending with /).
 extensions = .c, .h, .cpp, .go, .py, .java
 
-# 2. Comment Style
-# Determines the separator format.
-# Options: c (//), python (#), html (<!-- -->), sql (--)
+# 2. Default Comment Style
+# The tool now automatically detects style by extension (e.g., # for .py, <!-- --> for .qmd).
+# This option acts as a fallback for unknown extensions.
 style = c
 
 # 3. Output Filename Prefix
