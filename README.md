@@ -69,12 +69,13 @@ Rules follow the **Longest Match Wins** principle. A more specific (longer path)
 - `+`: Include
 - `-`: Exclude
 
-**4 Matching Modes:**
+**5 Matching Modes:**
 
 | Syntax | Mode | Recursive? | Check Extensions? | Description |
 | :--- | :--- | :--- | :--- | :--- |
 | **`+path/`** | **Directory** | ✅ Yes | ✅ Yes | Recursively includes files matching `extensions` in `path`. |
-| **`+path/**/pat`** | **Recur. Glob** | ✅ Yes | ❌ No | Recursively includes files matching the pattern `pat`. |
+| **`+path/**/pat`** | **Recur. Glob** | ✅ Yes | ❌ No | Recursively includes files matching `pat` in `path`. |
+| **`+pat`** | **Global Glob** | ✅ Yes | ❌ No | Recursively includes files matching `pat` in **any directory**. |
 | **`+path/pat`** | **Flat Glob** | ❌ No | ❌ No | Includes files matching `pat` in the **current directory only**. |
 | **`+path/file`** | **Exact File** | ❌ No | ❌ No | Includes this specific file. **Errors if missing.** |
 
@@ -144,12 +145,13 @@ output_prefix = my-code-analysis
 - `+` 表示包含 (Include)
 - `-` 表示排除 (Exclude)
 
-**4 种匹配模式：**
+**5 种匹配模式：**
 
 | 语法格式 | 模式名称 | 是否递归? | 检查全局后缀? | 说明 |
 | :--- | :--- | :--- | :--- | :--- |
 | **`+path/`** | **目录模式** | ✅ 是 | ✅ 是 | 递归包含 `path` 下所有符合 `extensions` 的文件。 |
 | **`+path/**/pat`** | **递归通配** | ✅ 是 | ❌ 否 | 递归包含 `path` 下所有匹配模式 `pat` 的文件。 |
+| **`+pat`** | **全局通配** | ✅ 是 | ❌ 否 | 递归包含**任意目录**下匹配模式 `pat` 的文件。 |
 | **`+path/pat`** | **平铺通配** | ❌ 否 | ❌ 否 | 仅包含 `path` **当前层级**下匹配 `pat` 的文件。 |
 | **`+path/file`** | **精确文件** | ❌ 否 | ❌ 否 | 精确包含此文件。如果文件不存在，会**报错**。 |
 

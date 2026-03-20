@@ -99,16 +99,24 @@ func ParseConfig(path string) (*Config, error) {
 				r.Pattern = parts[1] // 例如 *.h 或 *
 				r.CheckExts = false
 
+			} else if !strings.Contains(slashPath, "/") {
+				// 情况 3: 全局匹配规则 (+pattern 或 -pattern)
+				// 如果完全没有斜杠，则视为针对所有目录的递归匹配
+				r.BaseDir = ""
+				r.Pattern = slashPath
+				r.Recursive = true
+				r.CheckExts = false
+
 			} else {
-				// 情况 3: 平铺通配规则 (+path/pattern) 或 精确文件
+				// 情况 4: 平铺通配规则 (+path/pattern) 或 精确文件
 				// [修复] filepath.Dir 在 Windows 会返回 \，强制转 /
 				r.BaseDir = filepath.ToSlash(filepath.Dir(slashPath))
 				r.Pattern = filepath.Base(slashPath)
 				r.Recursive = false
 				r.CheckExts = false
 				
-				// 根目录修正: filepath.Dir("foo") -> "."
-				if r.BaseDir == "." && !strings.Contains(slashPath, "/") {
+				// 根目录修正: 如果用户写了 +./foo，Dir("./foo") 返回 "."
+				if r.BaseDir == "." && strings.HasPrefix(slashPath, "./") {
 					r.BaseDir = ""
 				}
 			}

@@ -45,14 +45,14 @@ func (e *Engine) initRules() {
 			}
 
 			// 2. 生成期待列表 (仅针对精确文件名)
-			// 如果 Pattern 不含通配符 (*, ?, [)，则视为显式文件期待
-			if !r.CheckExts && !hasMeta(r.Pattern) {
+			// 如果 Pattern 不含通配符 (*, ?,[)，且不是递归规则，则视为显式平铺文件期待
+			if !r.Recursive && !r.CheckExts && !hasMeta(r.Pattern) {
 				// 这是一个精确文件规则，如 +path/file.txt
 				full := filepath.Join(r.BaseDir, r.Pattern)
 				full = filepath.ToSlash(full)
-				
+
 				e.ExplicitFiles[full] = true
-				
+
 				dir := r.BaseDir
 				if e.ExpectationsByDir[dir] == nil {
 					e.ExpectationsByDir[dir] = make(map[string]bool)
@@ -82,9 +82,6 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 	if relDir == "." { relDir = "" }
 	e.VisitedDirs[relDir] = true
 
-	// [删除] 原来的这一行，因为现在不能在循环外只生成一次了
-	// sepLine, cStart, cEnd := GetCommentedSeparator(e.Cfg.CommentStyle)
-
 	// 文件处理
 	for _, entry := range entries {
 		if entry.IsDir() { continue }
@@ -95,16 +92,26 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 
 		// 核心判定
 		if e.shouldMerge(relPath, relDir, fileName) {
-			// [修改] 强制转为正斜杠输出
+			// 强制转为正斜杠输出
 			displayPath := filepath.ToSlash(fullPath)
-			fmt.Printf("%s合并: %s%s\n", ColorGreen, displayPath, ColorReset)
 
-			// [新增] 针对当前文件生成特定的分隔线
+			// 获取文件大小并格式化
+			// DirEntry.Info() 非常轻量，不会读取整个文件内容
+			info, _ := entry.Info()
+			sizeStr := "???"
+			if info != nil {
+				sizeStr = FormatByteSize(info.Size())
+			}
+
+			// 增加大小显示： [  1.2 KB] path/to/file
+			fmt.Printf("%s合并: [%s] %s%s\n", ColorGreen, sizeStr, displayPath, ColorReset)
+
+			// 针对当前文件生成特定的分隔线
 			// 传入 fileName 进行探测，传入 e.Cfg.CommentStyle 作为保底
 			sepLine, cStart, cEnd := GetCommentedSeparator(fileName, e.Cfg.CommentStyle)
 
 			outFile.WriteString(fmt.Sprintf("\n%s\n", sepLine))
-			// [修改] 文件内部的标记也建议用正斜杠，保持一致
+			// 文件内部的标记也建议用正斜杠，保持一致
 			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, displayPath, cEnd))
 			outFile.WriteString(fmt.Sprintf("%s\n", sepLine))
 
@@ -126,7 +133,7 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 			var expectedRel string
 			if relDir == "" { expectedRel = fname } else { expectedRel = relDir + "/" + fname }
 			if !e.MergedFiles[expectedRel] {
-				// [修改] 强制转为正斜杠输出
+				// 强制转为正斜杠输出
 				fmt.Printf("%s缺失: %s%s\n", ColorRed, filepath.ToSlash(expectedRel), ColorReset)
 			}
 		}
@@ -145,11 +152,11 @@ func (e *Engine) processDir(dirPath string, outFile *os.File) {
 
 func (e *Engine) shouldMerge(relPath string, relDir string, fileName string) bool {
 	bestLen := -1
-	bestAction := 0 
+	bestAction := 0
 
 	for _, r := range e.Cfg.Rules {
 		matched := false
-		
+
 		// 1. 检查目录是否匹配
 		dirMatch := false
 		if r.Recursive {
@@ -200,14 +207,14 @@ func (e *Engine) checkGlobalExt(fileName string) bool {
 
 func (e *Engine) shouldTraverse(relDir string) bool {
 	if e.TraversePaths[relDir] { return true }
-	
+
 	// 如果有递归规则覆盖了此目录，也必须遍历
 	for _, r := range e.Cfg.Rules {
 		if r.IsInclude && r.Recursive {
 			// 检查 relDir 是否在 r.BaseDir 之下 (或者就是 r.BaseDir)
 			// 注意：这里逻辑要反过来，如果我们还没走到 BaseDir，当然要往深了走
 			// 如果我们已经在 BaseDir 下面了，并且是 Recursive，那更要走
-			
+
 			// 情况 A: relDir 是 BaseDir 的上级 (正在前往 BaseDir 的路上) -> TraversePaths 已经处理了
 			// 情况 B: relDir 是 BaseDir 的下级 -> 允许进入
 			if r.BaseDir == "" || strings.HasPrefix(relDir, r.BaseDir+"/") {
@@ -228,7 +235,7 @@ func (e *Engine) reportInvalidDirs() {
 				fmt.Println("\n--- 检查无效路径 ---")
 				hasInvalid = true
 			}
-			// [修改] 强制转为正斜杠输出
+			// 强制转为正斜杠输出
 			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.ToSlash(dir), ColorReset)
 		}
 	}

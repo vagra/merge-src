@@ -35,5 +35,15 @@ func main() {
 	eng := internal.NewEngine(cfg)
 	eng.Run(".", outFile)
 
-	fmt.Printf("\n%s✔ 完成: %s%s\n", internal.ColorGreen, outputName, internal.ColorReset)
+	// 4. 获取结果文件大小
+	// 确保内容已写入磁盘 (虽然 Write 主要是内存操作，但为了 Stat 准确性)
+	outFile.Sync()
+	stat, _ := outFile.Stat()
+	sizeStr := "???"
+	if stat != nil {
+		sizeStr = internal.FormatByteSize(stat.Size())
+	}
+
+	// 输出格式： ✔ 完成: [ KB] filename.txt
+	fmt.Printf("\n%s✔ 完成: [%s] %s%s\n", internal.ColorGreen, sizeStr, outputName, internal.ColorReset)
 }
