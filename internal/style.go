@@ -27,17 +27,16 @@ func FormatByteSize(s int64) string {
 }
 
 // GetCommentedSeparator 生成带注释的分隔线
-// 增加 filename 参数，用于自动识别
-// fallbackStyle 用于当无法识别后缀时的默认风格(即配置文件里的 style)
-func GetCommentedSeparator(filename string, fallbackStyle string) (string, string, string) {
+// 纯自动探测文件后缀对应注释风格；若无法识别则以 // 统一保底
+func GetCommentedSeparator(filename string) (string, string, string) {
 	separator := strings.Repeat("=", 80)
 
-	// 1. 尝试自动探测
+	// 1. 尝试自动探测后缀注释符
 	cStart, cEnd := detectStyleByExt(filename)
 
-	// 2. 如果没探测到，使用默认配置
+	// 2. 若未识别后缀，以 // 作为通用保底注释
 	if cStart == "" {
-		cStart, cEnd = getCommentStyle(fallbackStyle)
+		cStart, cEnd = "//", ""
 	}
 
 	var commentedSeparator string
@@ -54,50 +53,50 @@ func detectStyleByExt(filename string) (string, string) {
 	ext := strings.ToLower(filepath.Ext(filename))
 
 	switch ext {
-	// Group 1: Hash Style (#)
-	case ".py", ".sh", ".bash", ".zsh", ".yaml", ".yml", ".conf", ".ini",
-	     ".dockerfile", ".makefile", ".rb", ".pl", ".r", ".toml":
-		return "#", ""
-
-	// Group 2: Double Dash (--)
-	case ".sql", ".lua", ".hs", ".vhdl", ".ada":
-		return "--", ""
-
-	// Group 3: HTML Style (<!-- -->)
-	case ".html", ".xml", ".md", ".qmd", ".markdown", ".vue":
-		return "<!--", "-->"
-
-	// Group 4: Percent (%)
-	case ".tex", ".latex", ".m": // Matlab/Octave/LaTeX
-		return "%", ""
-
-	// Group 5: C Style (//) - 大多数现代语言
-	// 包括 .typ (Typst)
-	case ".c", ".h", ".cpp", ".hpp", ".cc", ".go", ".java", ".js", ".ts",
-	     ".jsx", ".tsx", ".rust", ".rs", ".php", ".cs", ".swift", ".kt",
-	     ".scala", ".dart", ".typ", ".scss", ".less":
+	// 阵营 1: 双斜杠 (//) - 现代语言主力军、底层计算、着色器及 IDL
+	case ".c", ".h", ".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx", ".inc", ".inl", ".ipp", ".tpp",
+		".go", ".java", ".js", ".ts", ".jsx", ".tsx", ".rust", ".rs", ".php", ".cs", ".swift",
+		".kt", ".kts", ".scala", ".dart", ".typ", ".scss", ".less",
+		".zig", ".v", ".odin", ".mojo",
+		".glsl", ".vert", ".frag", ".geom", ".comp", ".hlsl", ".metal", ".wgsl", ".cu", ".cuh", ".cl",
+		".groovy", ".gvy", ".gradle", ".fs", ".fsi", ".fsx",
+		".svelte", ".sol", ".proto", ".thrift", ".jsonc", ".json5":
 		return "//", ""
 
-	// CSS (/* */) - 只有块注释
+	// 阵营 2: 井号 (#) - 脚本语言、IaC 基础设施及各类工程配置
+	case ".py", ".sh", ".bash", ".zsh", ".fish", ".ksh", ".csh", ".tcsh", ".awk", ".sed", ".env",
+		".yaml", ".yml", ".conf", ".ini", ".dockerfile", ".makefile", ".rb", ".pl", ".r", ".toml",
+		".nim", ".jl", ".cr", ".ex", ".exs", ".tcl", ".raku",
+		".cmake", ".properties", ".gitconfig", ".editorconfig", ".service", ".spec", ".tf", ".tfvars":
+		return "#", ""
+
+	// 阵营 3: 双横线 (--) - SQL 与特定函数式语言
+	case ".sql", ".lua", ".hs", ".vhdl", ".vhd", ".ada",
+		".elm", ".purs", ".agda", ".idr", ".applescript":
+		return "--", ""
+
+	// 阵营 4: HTML/XML 风格 (<!-- -->) - 标记语言与富文档
+	case ".html", ".htm", ".xhtml", ".xml", ".md", ".qmd", ".markdown", ".mdx",
+		".vue", ".astro", ".svg", ".xaml", ".plist", ".rss", ".atom":
+		return "<!--", "-->"
+
+	// 阵营 5: 分号 (;) - Lisp 族语言、汇编及 Windows 配置
+	case ".lisp", ".lsp", ".el", ".scm", ".rkt", ".clj", ".cljs", ".cljc", ".edn",
+		".asm", ".s", ".nasm", ".inf":
+		return ";", ""
+
+	// 阵营 6: 百分号 (%) - 科学计算与特定函数式语言
+	case ".tex", ".latex", ".sty", ".cls", ".m", ".erl", ".hrl":
+		return "%", ""
+
+	// 阵营 7: 单引号 (') - BASIC 家族
+	case ".vb", ".vba", ".vbs", ".bas":
+		return "'", ""
+
+	// 阵营 8: 块注释 (/* */)
 	case ".css":
 		return "/*", "*/"
 	}
 
-	return "", "" // 未知，交由 fallback 处理
-}
-
-// getCommentStyle 解析配置文件中的字符串设置 (保持兼容)
-func getCommentStyle(style string) (string, string) {
-	switch strings.ToLower(style) {
-	case "python", "ruby", "perl", "sh", "yaml", "conf", "ini", "dockerfile", "makefile", "shell":
-		return "#", ""
-	case "sql", "lua", "haskell":
-		return "--", ""
-	case "html", "xml", "markdown":
-		return "<!--", "-->"
-	case "tex", "latex":
-		return "%", ""
-	default:
-		return "//", ""
-	}
+	return "", "" // 未识别后缀，由上层以 // 统一优雅保底
 }

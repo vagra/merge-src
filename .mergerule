@@ -1,4 +1,5 @@
-extensions = .go
-output_prefix = merge_src
-
-+./
+*.exe
+*.zip
+*.txt
+*.sum
+*.md

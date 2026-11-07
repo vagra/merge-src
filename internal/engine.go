@@ -7,236 +7,118 @@ import (
 	"strings"
 )
 
-// Engine 结构体
+// Engine 合并处理引擎
 type Engine struct {
-	Cfg               *Config
-	ExplicitFiles     map[string]bool
-	ExpectationsByDir map[string]map[string]bool
-	MergedFiles       map[string]bool
-	VisitedDirs       map[string]bool
-	TraversePaths     map[string]bool
+	Cfg         *Config
+	IgnorePaths map[string]bool // 内置跳过路径（如自身输出文件、.mergerule）
+	MergedCount int             // 合并文件总数统计
 }
 
-func NewEngine(cfg *Config) *Engine {
-	e := &Engine{
-		Cfg:               cfg,
-		ExplicitFiles:     make(map[string]bool),
-		ExpectationsByDir: make(map[string]map[string]bool),
-		MergedFiles:       make(map[string]bool),
-		VisitedDirs:       make(map[string]bool),
-		TraversePaths:     make(map[string]bool),
+// NewEngine 创建并初始化引擎
+func NewEngine(cfg *Config, ignoreFiles ...string) *Engine {
+	ignoreMap := make(map[string]bool)
+	for _, f := range ignoreFiles {
+		ignoreMap[filepath.ToSlash(f)] = true
 	}
-	e.initRules()
-	return e
-}
-
-func (e *Engine) initRules() {
-	for _, r := range e.Cfg.Rules {
-		if r.IsInclude {
-			// 1. 计算 Vital Path (BaseDir 的父级必须遍历)
-			if r.BaseDir != "" {
-				parts := strings.Split(r.BaseDir, "/")
-				// 注意：如果 BaseDir 是 a/b，我们需要保证 a 被遍历
-				for i := 1; i <= len(parts); i++ {
-					e.TraversePaths[strings.Join(parts[:i], "/")] = true
-				}
-			} else {
-				e.TraversePaths[""] = true // 根目录
-			}
-
-			// 2. 生成期待列表 (仅针对精确文件名)
-			// 如果 Pattern 不含通配符 (*, ?,[)，且不是递归规则，则视为显式平铺文件期待
-			if !r.Recursive && !r.CheckExts && !hasMeta(r.Pattern) {
-				// 这是一个精确文件规则，如 +path/file.txt
-				full := filepath.Join(r.BaseDir, r.Pattern)
-				full = filepath.ToSlash(full)
-
-				e.ExplicitFiles[full] = true
-
-				dir := r.BaseDir
-				if e.ExpectationsByDir[dir] == nil {
-					e.ExpectationsByDir[dir] = make(map[string]bool)
-				}
-				e.ExpectationsByDir[dir][r.Pattern] = true
-			}
-		}
+	return &Engine{
+		Cfg:         cfg,
+		IgnorePaths: ignoreMap,
 	}
 }
 
-// 简单的检查是否包含 Glob 通配符
-func hasMeta(path string) bool {
-	return strings.ContainsAny(path, "*?[]")
-}
-
+// Run 启动引擎并遍历
 func (e *Engine) Run(startDir string, outFile *os.File) {
-	fmt.Println("--- 智能遍历目录 (Glob Engine) ---")
-	e.processDir(startDir, outFile)
-	e.reportInvalidDirs()
+	fmt.Println("--- 智能合并目录 (Gitignore Engine) ---")
+	e.processDir(startDir, "", outFile)
 }
 
-func (e *Engine) processDir(dirPath string, outFile *os.File) {
+func (e *Engine) processDir(dirPath string, relDir string, outFile *os.File) {
 	entries, err := os.ReadDir(dirPath)
-	if err != nil { return }
+	if err != nil {
+		return
+	}
 
-	relDir := filepath.ToSlash(dirPath)
-	if relDir == "." { relDir = "" }
-	e.VisitedDirs[relDir] = true
-
-	// 文件处理
+	// 1. 处理当前目录下的所有文件
 	for _, entry := range entries {
-		if entry.IsDir() { continue }
+		if entry.IsDir() {
+			continue
+		}
 
 		fileName := entry.Name()
 		fullPath := filepath.Join(dirPath, fileName)
-		relPath := filepath.ToSlash(fullPath)
+		slashPath := filepath.ToSlash(fullPath)
 
-		// 核心判定
-		if e.shouldMerge(relPath, relDir, fileName) {
-			// 强制转为正斜杠输出
-			displayPath := filepath.ToSlash(fullPath)
-
-			// 获取文件大小并格式化
-			// DirEntry.Info() 非常轻量，不会读取整个文件内容
-			info, _ := entry.Info()
-			sizeStr := "???"
-			if info != nil {
-				sizeStr = FormatByteSize(info.Size())
-			}
-
-			// 增加大小显示： [  1.2 KB] path/to/file
-			fmt.Printf("%s合并: [%s] %s%s\n", ColorGreen, sizeStr, displayPath, ColorReset)
-
-			// 针对当前文件生成特定的分隔线
-			// 传入 fileName 进行探测，传入 e.Cfg.CommentStyle 作为保底
-			sepLine, cStart, cEnd := GetCommentedSeparator(fileName, e.Cfg.CommentStyle)
-
-			outFile.WriteString(fmt.Sprintf("\n%s\n", sepLine))
-			// 文件内部的标记也建议用正斜杠，保持一致
-			outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, displayPath, cEnd))
-			outFile.WriteString(fmt.Sprintf("%s\n", sepLine))
-
-			content, err := os.ReadFile(fullPath)
-			if err == nil {
-				outFile.Write(content)
-				// 确保文件末尾换行，防止下一个 header 粘连
-				outFile.WriteString("\n")
-			} else {
-				outFile.WriteString(fmt.Sprintf("// Error reading file: %v\n", err))
-			}
-			e.MergedFiles[relPath] = true
+		// 检查内置保护文件（如 .mergerule、.gitignore、输出文件）
+		if fileName == ".mergerule" || fileName == ".gitignore" || e.IgnorePaths[slashPath] || e.IgnorePaths[fileName] {
+			continue
 		}
-	}
 
-	// 缺失检查
-	if expectedFiles, ok := e.ExpectationsByDir[relDir]; ok {
-		for fname := range expectedFiles {
-			var expectedRel string
-			if relDir == "" { expectedRel = fname } else { expectedRel = relDir + "/" + fname }
-			if !e.MergedFiles[expectedRel] {
-				// 强制转为正斜杠输出
-				fmt.Printf("%s缺失: %s%s\n", ColorRed, filepath.ToSlash(expectedRel), ColorReset)
-			}
+		// 构建 Git 相对路径切片
+		parts := makePathParts(relDir, fileName)
+
+		// Gitignore 语义：Match 返回 true 代表被排除；返回 false 代表包含
+		if e.Cfg.Matcher != nil && e.Cfg.Matcher.Match(parts, false) {
+			continue
 		}
-	}
 
-	// 递归
-	for _, entry := range entries {
-		if !entry.IsDir() { continue }
-		subDir := filepath.Join(dirPath, entry.Name())
-		relSub := filepath.ToSlash(subDir)
-		if e.shouldTraverse(relSub) {
-			e.processDir(subDir, outFile)
+		// 命中包含：获取大小并实时汇报
+		info, _ := entry.Info()
+		sizeStr := "???"
+		if info != nil {
+			sizeStr = FormatByteSize(info.Size())
 		}
-	}
-}
+		fmt.Printf("%s合并: [%s] %s%s\n", ColorGreen, sizeStr, slashPath, ColorReset)
 
-func (e *Engine) shouldMerge(relPath string, relDir string, fileName string) bool {
-	bestLen := -1
-	bestAction := 0
+		// 自动探测后缀注释符并写入文件头
+		sepLine, cStart, cEnd := GetCommentedSeparator(fileName)
+		outFile.WriteString(fmt.Sprintf("\n%s\n", sepLine))
+		outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, slashPath, cEnd))
+		outFile.WriteString(fmt.Sprintf("%s\n", sepLine))
 
-	for _, r := range e.Cfg.Rules {
-		matched := false
-
-		// 1. 检查目录是否匹配
-		dirMatch := false
-		if r.Recursive {
-			// 递归模式: 必须是 BaseDir 或者是 BaseDir 的子目录
-			if r.BaseDir == "" || relDir == r.BaseDir || strings.HasPrefix(relDir, r.BaseDir+"/") {
-				dirMatch = true
-			}
+		// 写入文件正文并换行防粘连
+		content, err := os.ReadFile(fullPath)
+		if err == nil {
+			outFile.Write(content)
+			outFile.WriteString("\n")
 		} else {
-			// 平铺模式: 必须在 BaseDir 当前层级
-			if relDir == r.BaseDir {
-				dirMatch = true
-			}
+			outFile.WriteString(fmt.Sprintf("// 读取文件失败: %v\n", err))
 		}
-
-		// 2. 检查文件/后缀是否匹配
-		if dirMatch {
-			if r.CheckExts {
-				// 目录规则 (+path/): 检查全局 extensions
-				if e.checkGlobalExt(fileName) {
-					matched = true
-				}
-			} else {
-				// 模式规则 (+path/*.c): 使用 filepath.Match 进行标准 Glob 匹配
-				// r.Pattern 可能是 *, *.c, name.*, test_?.c 等
-				if ok, _ := filepath.Match(r.Pattern, fileName); ok {
-					matched = true
-				}
-			}
-		}
-
-		if matched {
-			if len(r.Raw) > bestLen {
-				bestLen = len(r.Raw)
-				if r.IsInclude { bestAction = 1 } else { bestAction = 2 }
-			}
-		}
+		e.MergedCount++
 	}
-	return bestAction == 1
+
+	// 2. 递归遍历子目录
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		dirName := entry.Name()
+		// 内置忽略版本控制目录
+		if dirName == ".git" {
+			continue
+		}
+
+		subRelDir := dirName
+		if relDir != "" {
+			subRelDir = relDir + "/" + dirName
+		}
+		dirParts := strings.Split(subRelDir, "/")
+
+		// 目录级别剪枝判定：如果目录本身被排除，直接截断不再深入扫描
+		if e.Cfg.Matcher != nil && e.Cfg.Matcher.Match(dirParts, true) {
+			continue
+		}
+
+		subDir := filepath.Join(dirPath, dirName)
+		e.processDir(subDir, subRelDir, outFile)
+	}
 }
 
-func (e *Engine) checkGlobalExt(fileName string) bool {
-	ext := filepath.Ext(fileName)
-	for _, valid := range e.Cfg.Extensions {
-		if strings.EqualFold(ext, valid) { return true }
+// makePathParts 将目录与文件名组合为 gitignore 所需的路径段切片
+func makePathParts(relDir string, fileName string) []string {
+	if relDir == "" {
+		return []string{fileName}
 	}
-	return false
-}
-
-func (e *Engine) shouldTraverse(relDir string) bool {
-	if e.TraversePaths[relDir] { return true }
-
-	// 如果有递归规则覆盖了此目录，也必须遍历
-	for _, r := range e.Cfg.Rules {
-		if r.IsInclude && r.Recursive {
-			// 检查 relDir 是否在 r.BaseDir 之下 (或者就是 r.BaseDir)
-			// 注意：这里逻辑要反过来，如果我们还没走到 BaseDir，当然要往深了走
-			// 如果我们已经在 BaseDir 下面了，并且是 Recursive，那更要走
-
-			// 情况 A: relDir 是 BaseDir 的上级 (正在前往 BaseDir 的路上) -> TraversePaths 已经处理了
-			// 情况 B: relDir 是 BaseDir 的下级 -> 允许进入
-			if r.BaseDir == "" || strings.HasPrefix(relDir, r.BaseDir+"/") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func (e *Engine) reportInvalidDirs() {
-	// 保持不变
-	hasInvalid := false
-	for dir := range e.ExpectationsByDir {
-		if dir == "" { continue }
-		if !e.VisitedDirs[dir] {
-			if !hasInvalid {
-				fmt.Println("\n--- 检查无效路径 ---")
-				hasInvalid = true
-			}
-			// 强制转为正斜杠输出
-			fmt.Printf("%s目录未找到: %s (其下指定文件均缺失)%s\n", ColorRed, filepath.ToSlash(dir), ColorReset)
-		}
-	}
+	parts := strings.Split(relDir, "/")
+	return append(parts, fileName)
 }
