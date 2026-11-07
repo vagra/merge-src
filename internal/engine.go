@@ -1,10 +1,15 @@
 package internal
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 // Engine 合并处理引擎
@@ -75,10 +80,11 @@ func (e *Engine) processDir(dirPath string, relDir string, outFile *os.File) {
 		outFile.WriteString(fmt.Sprintf("%s FILE: %s %s\n", cStart, slashPath, cEnd))
 		outFile.WriteString(fmt.Sprintf("%s\n", sepLine))
 
-		// 写入文件正文并换行防粘连
+		// 写入文件正文并换行防粘连 (强制检测并转码为合法 UTF-8)
 		content, err := os.ReadFile(fullPath)
 		if err == nil {
-			outFile.Write(content)
+			cleanContent := EnsureUTF8(content)
+			outFile.Write(cleanContent)
 			outFile.WriteString("\n")
 		} else {
 			outFile.WriteString(fmt.Sprintf("// 读取文件失败: %v\n", err))
@@ -121,4 +127,26 @@ func makePathParts(relDir string, fileName string) []string {
 	}
 	parts := strings.Split(relDir, "/")
 	return append(parts, fileName)
+}
+
+// EnsureUTF8 确保输入字节流为标准合法的 UTF-8 编码
+// 自动剥离 BOM，并智能将 Windows 嵌入式常见的 GBK/GB2312/GB18030 无损转码为 UTF-8
+func EnsureUTF8(data []byte) []byte {
+	// 1. 剥离 UTF-8 BOM 头 (\xEF\xBB\xBF)，避免多文件合并后出现非法控制符
+	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+
+	// 2. 若已经是合法 UTF-8，零开销直接返回
+	if utf8.Valid(data) {
+		return data
+	}
+
+	// 3. 若为非 UTF-8 编码，采用 GB18030 解码器 (完全向下兼容 GBK 与 GB2312) 转码为 UTF-8
+	reader := transform.NewReader(bytes.NewReader(data), simplifiedchinese.GB18030.NewDecoder())
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(reader); err == nil {
+		return buf.Bytes()
+	}
+
+	// 异常情况下保底返回
+	return data
 }

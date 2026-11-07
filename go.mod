@@ -2,7 +2,10 @@ module merge-src
 
 go 1.26.5
 
-require github.com/go-git/go-git/v5 v5.19.3
+require (
+	github.com/go-git/go-git/v5 v5.19.3
+	golang.org/x/text v0.41.0
+)
 
 require (
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
