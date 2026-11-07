@@ -1,6 +1,6 @@
 # merge-src: AI Code Context Builder
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Go](https://img.shields.io/badge/go-1.20+-00ADD8.svg)
+![License](https://img.shields.io/badge/license-MIT-blue.svg) ![Go](https://img.shields.io/badge/go-1.24+-00ADD8.svg)
 
 > **Navigation**: [🇺🇸 English](#english-documentation) | [🇨🇳 中文说明](#chinese-documentation)
 
@@ -8,17 +8,17 @@
 
 ## 🇺🇸 English Documentation
 
-**merge-src** is a CLI tool designed to help developers build **Code Context** for LLMs (Large Language Models). It intelligently merges source code from your project into a single text file based on a configuration file (`.mergerule`), automatically adding file path comments and separators.
+**merge-src** is a lightweight, zero-config CLI tool designed to pack your project source code into a single, clean text file — perfectly tailored as **Code Context** for LLMs (Large Language Models) in browser chat boxes or prompt workflows.
 
-Unlike `cat` or `find`, its core goal is **Validation** — ensuring the context you feed to AI is complete and accurate.
+Powered by standard `.gitignore` syntax, it allows developers to precisely curate which source files to include or exclude without any learning curve.
 
-### ✨ Features
+### ✨ Key Features
 
-- **🎯 Precise Control**: Define rules via `.mergerule`, supporting recursion, wildcards, and exact paths.
-- **🕵️‍♀️ Missing Detection**: The killer feature. If a rule requires a file that doesn't exist, it alerts you with **RED** highlights immediately.
-- **🧠 Smart Filtering**: Directory rules automatically respect your `extensions` setting (e.g., only `.c`, `.h`).
-- **🎨 Smart Syntax**: Automatically detects file types to apply the correct comment style (e.g., `//` for C, `#` for Python, `<!-- -->` for Quarto). Configured style acts as a fallback.
-- **⚡️ Zero Dependency**: Single binary, cross-platform.
+- **🎯 Standard Gitignore Engine**: Powered by `go-git`, supporting sequential evaluation, `!` re-inclusion, wildcards (`*`, `**`), and directory pruning. Zero learning cost.
+- **⚙️ Zero-Config Design**: No tedious `key = value` options. Automatically names output files after the current project root directory (`<project>-YYYYMMDD-HHMM.txt`).
+- **🌐 Seamless UTF-8 Transcoding**: Automatically detects and lossless converts legacy encodings (ANSI, GBK, GB2312, GB18030) and strips BOM headers, eliminating garbled Chinese comments in AI chats.
+- **🎨 Auto Comment Delimiters**: Auto-detects 8 language families (C/C++, Scripting, SQL, Lisp/ASM, HTML, LaTeX, BASIC, CSS) to create clean, syntax-friendly file separators.
+- **🛡️ Built-in Protection**: Automatically ignores `.git/`, `.mergerule`, `.gitignore`, and the generated output file to prevent recursive self-merging and metadata pollution.
 
 ### 📦 Installation
 
@@ -40,44 +40,59 @@ go build
 ### 🚀 Quick Start
 
 1. Go to your project root.
-2. Create a config file `.mergerule` (copy from `.mergerule.example_en`).
+2. Create a rule file named `.mergerule`.
 3. Run:
 
 ```bash
 merge-src
 ```
 
-### 📝 Configuration (.mergerule)
+### 📝 Rule Syntax (.mergerule)
 
-#### Global Settings
+`.mergerule` uses standard Gitignore syntax. Sequential evaluation applies: **later rules override earlier ones (Last Match Wins)**.
 
-```ini
-# Auto-filter files by extension (only applies to Directory Mode rules)
-extensions = .c, .h, .cpp
+#### Pattern A: Blacklist Mode (Default: Merge All, Exclude Unwanted)
 
-# Default/Fallback comment style (used if extension is unknown)
-style = c
+```gitignore
+# Exclude build artifacts and dependencies
+*.exe
+*.o
+*.a
+node_modules/
+dist/
+build/
 
-# Output filename prefix
-output_prefix = my-code-analysis
+# Exclude docs or test folders
+docs/
+test/
 ```
 
-#### Path Rules (The Logic)
+#### Pattern B: Whitelist Mode (Recommended for Large Repos)
 
-Rules follow the **Longest Match Wins** principle. A more specific (longer path) rule overrides a general one.
+```gitignore
+# 1. Ignore everything under root
+/*
 
-- `+`: Include
-- `-`: Exclude
+# 2. Re-include target directories and subfiles
+!/src/
+!/src/**
+!/inc/
+!/inc/**
 
-**5 Matching Modes:**
+# 3. Filter specific files inside whitelisted directories
+src/legacy/
+*.tmp
+```
 
-| Syntax | Mode | Recursive? | Check Extensions? | Description |
-| :--- | :--- | :--- | :--- | :--- |
-| **`+path/`** | **Directory** | ✅ Yes | ✅ Yes | Recursively includes files matching `extensions` in `path`. |
-| **`+path/**/pat`** | **Recur. Glob** | ✅ Yes | ❌ No | Recursively includes files matching `pat` in `path`. |
-| **`+pat`** | **Global Glob** | ✅ Yes | ❌ No | Recursively includes files matching `pat` in **any directory**. |
-| **`+path/pat`** | **Flat Glob** | ❌ No | ❌ No | Includes files matching `pat` in the **current directory only**. |
-| **`+path/file`** | **Exact File** | ❌ No | ❌ No | Includes this specific file. **Errors if missing.** |
+#### Pattern C: Re-include Files in Excluded Folders
+
+> **Git Rule**: You cannot re-include a file if its parent directory is excluded. Always exclude folder contents instead of the directory itself:
+
+```gitignore
+# Correct: Exclude folder contents, then re-include specific file
+test/*
+!test/main_test.c
+```
 
 ---
 
@@ -85,17 +100,17 @@ Rules follow the **Longest Match Wins** principle. A more specific (longer path)
 
 ## 🇨🇳 中文说明
 
-**merge-src** 是一个专为大模型（LLM）辅助编程设计的命令行工具。它可以根据配置文件（`.mergerule`）智能地将项目中的源代码合并为一个单一的文本文件。
+**merge-src** 是一款专为大模型（LLM）对话辅助编程设计的轻量级代码上下文打包工具。它可以根据项目根目录下的 `.mergerule` 规则，将整个项目的源代码智能整合成一个排版清晰、携带语义注释的单一文本文件，方便在网页聊天框中直接提交给 AI。
 
-它的核心设计目标是**“验证性”** —— 确保你喂给 AI 的代码上下文是完整且准确的，防止“幻觉”上下文。
+工具完全遵循业界标准的 `.gitignore` 规则语法，开箱即用，零认知成本。
 
 ### ✨ 核心特性
 
-- **🎯 精确控制**：通过 `.mergerule` 配置包含/排除规则，支持递归、通配符和精确文件指定。
-- **🕵️‍♀️ 缺失检测**：杀手级功能。如果规则中明确要求的文件未找到，工具会立刻用**红色高亮**报警。
-- **🧠 智能过滤**：目录模式下会自动根据 `extensions` 过滤无关文件（如二进制文件）。
-- **🎨 智能语法**：自动根据文件后缀（如 .py, .qmd）选择正确的注释风格，生成的分割线不会破坏代码语法。仅在无法识别时使用默认配置。
-- **⚡️ 零依赖**：单文件 Go 二进制，跨平台。
+- **🎯 标准 Gitignore 引擎**：由工业级 `go-git` 官方规范驱动，原生支持线性匹配、`!` 否定放行、层级通配符（`*`, `**`）与目录级剪枝，学习成本归零。
+- **⚙️ 极致零配置（Zero-Config）**：彻底剔除繁琐的 `key = value` 参数，自动以当前项目目录名命名输出文件（`<项目名>-YYYYMMDD-HHMM.txt`）。
+- **🌐 智能编码清洗与转码**：自动检测非 UTF-8 源码（如嵌入式 Keil/ADS 老项目中的 ANSI / GBK / GB2312 / GB18030），自动剥离 BOM 并无损转码为纯正 UTF-8，彻底终结 AI 乱码噩梦。
+- **🎨 8 大阵营多语言注释自适应**：全自动识别绝大多数主流、现代新兴及嵌入式底层语言后缀（C/C++、Python、SQL、Lisp/汇编、HTML、LaTeX 等），精准插入对应风格的分割注释线。
+- **🛡️ 内置安全防护**：系统自动排除 `.git/` 版本库、`.mergerule`、`.gitignore` 及输出合并文件自身，杜绝自吞噬死循环与元数据污染。
 
 ### 📦 安装
 
@@ -113,45 +128,63 @@ cd merge-src
 go build
 ```
 
-### 🚀 快速开始
+### 🚀 快速上手
 
-1. 进入你的代码项目目录。
-2. 创建配置文件 `.mergerule` (复制 `.mergerule.example_cn` 并重命名)。
-3. 运行：
+1. 进入需要打包的代码项目根目录。
+2. 创建规则文件 `.mergerule`（语法与 `.gitignore` 完全一致）。
+3. 执行合并命令：
 
 ```bash
 merge-src
 ```
 
-### 📝 配置文件规范 (.mergerule)
+### 📝 规则编写指南 (.mergerule)
 
-#### 全局设置
+规则严格遵循标准 Gitignore 规范：**自上而下逐行扫描，后声明的规则覆盖前规则（Last Match Wins）**。
 
-```ini
-# 源码后缀 (仅对目录模式生效)
-extensions = .c, .h, .cpp
+#### 模式 A：黑名单模式（默认全部合并，排除特定杂项）
 
-# 默认/保底注释风格 (当后缀无法识别时使用)
-style = c
+```gitignore
+# 排除编译产物与二进制库
+*.exe
+*.o
+*.a
+*.bin
 
-# 输出文件名前缀
-output_prefix = my-code-analysis
+# 排除依赖与构建目录
+node_modules/
+dist/
+build/
+bin/
+
+# 排除文档或多媒体资源
+docs/
+assets/
 ```
 
-#### 路径规则逻辑
+#### 模式 B：白名单模式（大型复杂项目最佳实践）
 
-规则遵循 **“最长匹配优先” (Longest Match Wins)** 原则。
+```gitignore
+# 1. 忽略根目录下的所有内容 (IDE 缓存与杂项直接剪枝，扫描极快)
+/*
 
-- `+` 表示包含 (Include)
-- `-` 表示排除 (Exclude)
+# 2. 显式放行核心源码目录
+!/src/
+!/src/**
+!/inc/
+!/inc/**
 
-**5 种匹配模式：**
+# 3. 在放行目录中进一步细化排除
+src/JPEGlib/
+*.tmp
+```
 
-| 语法格式 | 模式名称 | 是否递归? | 检查全局后缀? | 说明 |
-| :--- | :--- | :--- | :--- | :--- |
-| **`+path/`** | **目录模式** | ✅ 是 | ✅ 是 | 递归包含 `path` 下所有符合 `extensions` 的文件。 |
-| **`+path/**/pat`** | **递归通配** | ✅ 是 | ❌ 否 | 递归包含 `path` 下所有匹配模式 `pat` 的文件。 |
-| **`+pat`** | **全局通配** | ✅ 是 | ❌ 否 | 递归包含**任意目录**下匹配模式 `pat` 的文件。 |
-| **`+path/pat`** | **平铺通配** | ❌ 否 | ❌ 否 | 仅包含 `path` **当前层级**下匹配 `pat` 的文件。 |
-| **`+path/file`** | **精确文件** | ❌ 否 | ❌ 否 | 精确包含此文件。如果文件不存在，会**报错**。 |
+#### 模式 C：在已排除目录中“捡回”特定文件
 
+> **核心铁律**：如果父目录整体被排除，其子文件无法通过 `!` 重新包含。必须排除目录下的内容，而非排除目录本身：
+
+```gitignore
+# 正确写法：排除 test 目录内容，但单独捡回 main_test.c
+test/*
+!test/main_test.c
+```

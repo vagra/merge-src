@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) [2025] [Vagra Swift]
+Copyright (c) 2025-2026 Vagra Swift
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
